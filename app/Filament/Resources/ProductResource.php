@@ -2,16 +2,18 @@
 
 namespace App\Filament\Resources;
 
-use App\Filament\Resources\ProductResource\Pages;
-use App\Filament\Resources\ProductResource\RelationManagers;
-use App\Models\Product;
 use Filament\Forms;
-use Filament\Forms\Form;
-use Filament\Resources\Resource;
 use Filament\Tables;
+use App\Models\Product;
+use Filament\Forms\Form;
 use Filament\Tables\Table;
+use Illuminate\Support\Str;
+use Filament\Resources\Resource;
 use Illuminate\Database\Eloquent\Builder;
+use App\Filament\Resources\ProductResource\Pages;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
+use Filament\Forms\Components\SpatieMediaLibraryFileUpload;
+use App\Filament\Resources\ProductResource\RelationManagers;
 
 class ProductResource extends Resource
 {
@@ -23,60 +25,138 @@ class ProductResource extends Resource
     {
         return $form
             ->schema([
-                Forms\Components\TextInput::make('name')
-                    ->required()
-                    ->maxLength(191),
-                Forms\Components\TextInput::make('slug')
-                    ->maxLength(191),
-                Forms\Components\Textarea::make('description')
-                    ->columnSpanFull(),
-                Forms\Components\TextInput::make('qty')
-                    ->required()
-                    ->numeric()
-                    ->default(0),
-                Forms\Components\TextInput::make('security_stock')
-                    ->required()
-                    ->numeric()
-                    ->default(0),
-                Forms\Components\Toggle::make('is_visible')
-                    ->required(),
-                Forms\Components\TextInput::make('price')
-                    ->numeric()
-                    ->prefix('$'),
-                Forms\Components\DatePicker::make('published_at'),
-            ]);
+                Forms\Components\Group::make()
+                    ->schema([
+                        Forms\Components\Section::make()
+                            ->schema([
+                                Forms\Components\TextInput::make('name')
+                                    ->required()
+                                    ->maxValue(50)
+                                    ->live(onBlur: true)
+                                    ->afterStateUpdated(fn (string $operation, $state, Forms\Set $set) => ($operation === 'create' || $operation === 'edit') ? $set('slug', Str::slug($state)) : null),
+
+                                Forms\Components\TextInput::make('slug')
+                                    ->disabled()
+                                    ->dehydrated()
+                                    ->required()
+                                    ->unique(Product::class, 'slug', ignoreRecord: true),
+
+                                Forms\Components\MarkdownEditor::make('description')
+                                    ->columnSpan('full'),
+                            ])
+                            ->columns(2),
+
+                        Forms\Components\Section::make('Images')
+                            ->schema([
+                                SpatieMediaLibraryFileUpload::make('media')
+                                    ->collection('product-images')
+                                    ->multiple()
+                                    ->maxFiles(5)
+                                    ->disableLabel(),
+                            ])
+                            ->collapsible(),
+
+                        Forms\Components\Section::make('Pricing')
+                            ->schema([
+                                Forms\Components\TextInput::make('price')
+                                    ->numeric()
+                                    ->rules(['regex:/^\d{1,6}(\.\d{0,2})?$/'])
+                                    ->required(),
+                            ])
+                            ->columns(2),
+                        Forms\Components\Section::make('Inventory')
+                            ->schema([
+
+
+                                Forms\Components\TextInput::make('qty')
+                                    ->label('Quantity')
+                                    ->numeric()
+                                    ->rules(['integer', 'min:0'])
+                                    ->required(),
+
+                                Forms\Components\TextInput::make('security_stock')
+                                    ->helperText('The safety stock is the limit stock for your products which alerts you if the product stock will soon be out of stock.')
+                                    ->numeric()
+                                    ->rules(['integer', 'min:0'])
+                                    ->required(),
+                            ])
+                            ->columns(2),
+                    ])
+                    ->columnSpan(['lg' => 2]),
+
+                Forms\Components\Group::make()
+                    ->schema([
+                        Forms\Components\Section::make('Status')
+                            ->schema([
+                                Forms\Components\Toggle::make('is_visible')
+                                    ->label('Visible')
+                                    ->helperText('This product will be hidden from all sales channels.')
+                                    ->default(true),
+
+                                Forms\Components\DatePicker::make('published_at')
+                                    ->label('Availability')
+                                    ->default(now())
+                                    ->required(),
+                            ]),
+
+                        Forms\Components\Section::make('Associations')
+                            ->schema([
+
+                                Forms\Components\Select::make('categories')
+                                    ->relationship('categories', 'name')
+                                    ->multiple()
+                                    ->required(),
+                            ]),
+                    ])
+                    ->columnSpan(['lg' => 1]),
+            ])
+            ->columns(3);
     }
 
     public static function table(Table $table): Table
     {
         return $table
             ->columns([
+                Tables\Columns\SpatieMediaLibraryImageColumn::make('product-image')
+                    ->label('Image')
+                    ->collection('product-images'),
+
                 Tables\Columns\TextColumn::make('name')
-                    ->searchable(),
-                Tables\Columns\TextColumn::make('slug')
-                    ->searchable(),
-                Tables\Columns\TextColumn::make('qty')
-                    ->numeric()
+                    ->label('Name')
+                    ->searchable()
                     ->sortable(),
-                Tables\Columns\TextColumn::make('security_stock')
-                    ->numeric()
-                    ->sortable(),
+
+
                 Tables\Columns\IconColumn::make('is_visible')
-                    ->boolean(),
+                    ->label('Visibility')
+                    ->boolean()
+                    ->sortable()
+                    ->toggleable(),
+
                 Tables\Columns\TextColumn::make('price')
-                    ->money()
+                    ->label('Price')
+                    ->searchable()
                     ->sortable(),
+
+
+                Tables\Columns\TextColumn::make('qty')
+                    ->label('Quantity')
+                    ->searchable()
+                    ->sortable()
+                    ->toggleable(),
+
+                Tables\Columns\TextColumn::make('security_stock')
+                    ->searchable()
+                    ->sortable()
+                    ->toggleable()
+                    ->toggledHiddenByDefault(),
+
                 Tables\Columns\TextColumn::make('published_at')
+                    ->label('Publish Date')
                     ->date()
-                    ->sortable(),
-                Tables\Columns\TextColumn::make('created_at')
-                    ->dateTime()
                     ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-                Tables\Columns\TextColumn::make('updated_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
+                    ->toggleable()
+                    ->toggledHiddenByDefault(),
             ])
             ->filters([
                 //
@@ -90,14 +170,14 @@ class ProductResource extends Resource
                 ]),
             ]);
     }
-    
+
     public static function getRelations(): array
     {
         return [
             //
         ];
     }
-    
+
     public static function getPages(): array
     {
         return [
@@ -105,5 +185,10 @@ class ProductResource extends Resource
             'create' => Pages\CreateProduct::route('/create'),
             'edit' => Pages\EditProduct::route('/{record}/edit'),
         ];
-    }    
+    }
+
+    protected function getRedirectUrl(): string
+    {
+        return $this->getResource()::getUrl('index');
+    }
 }
